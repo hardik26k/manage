@@ -16,13 +16,12 @@ app.add_middleware(
 	allow_headers=["*"],
 )
 
-# Data SCHEMA
 class ItemCreate(BaseModel):
-	name: str
-    brand_name: str
-	product_type: str
-	price: float
-	quantity: int
+    name: str
+    brand_name: str = None
+    product_type: str = None
+    price: float
+    quantity: int
 
 def get_db():
     conn = sqlite3.connect("inventory.db")
@@ -36,7 +35,8 @@ with get_db() as conn:
 		CREATE TABLE IF NOT EXISTS items (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			name TEXT NOT NULL,
-			description TEXT,
+			brand_name TEXT,
+			product_type TEXT,
 			price REAL NOT NULL,
 			quantity INTEGER NOT NULL
 		)
@@ -104,12 +104,12 @@ def create_item(item: ItemCreate):
         cursor = conn.cursor()
         try:
             cursor.execute(
-                "INSERT INTO items (name, description, quantity, price) VALUES (?, ?, ?, ?)",
-                (item.name, item.description, item.quantity, item.price)
+                "INSERT INTO items (name, brand_name, product_type, quantity, price) VALUES (?, ?, ?, ?, ?)",
+                (item.name, item.brand_name, item.product_type, item.quantity, item.price)
             )
             conn.commit()
             item_id = cursor.lastrowid
-            return {"id": item_id, "name": item.name, "description": item.description, "quantity": item.quantity, "price": item.price}
+            return {"id": item_id, "name": item.name, "brand_name": item.brand_name, "product_type": item.product_type, "quantity": item.quantity, "price": item.price}
         except sqlite3.IntegrityError:
             raise HTTPException(status_code=400, detail="Item already exists.")
 
