@@ -1,0 +1,421 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Inventory Manager</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 text-gray-800 font-sans antialiased min-h-screen">
+
+    <!-- Top Bar -->
+    <header class="bg-indigo-600 text-white shadow-md">
+        <div class="max-w-7xl mx-auto px-4 py-4 flex justify-between items-center">
+            <h1 class="text-2xl font-bold tracking-tight">Inventory Manager</h1>
+            <button onclick="openAddModal()" class="bg-indigo-500 hover:bg-indigo-700 text-white font-medium px-4 py-2 rounded-lg shadow transition duration-150">
+                + Add New Item
+            </button>
+        </div>
+    </header>
+
+    <!-- Main Content Container -->
+    <main class="max-w-7xl mx-auto px-4 py-8">
+
+        <!-- Error / Success Alert Box -->
+        <div id="alert-container" class="hidden mb-6 p-4 rounded-lg text-sm font-medium transition-all"></div>
+
+        <!-- Controls Card: Search & Filters -->
+        <div class="bg-white p-4 rounded-xl shadow-sm border border-gray-200 mb-6 space-y-4 md:space-y-0 md:flex md:items-center md:justify-between md:space-x-4">
+            
+            <!-- Live Search Bar -->
+            <div class="relative flex-1">
+                <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-gray-400">
+                    🔍
+                </div>
+                <input type="text" id="search-input" oninput="applyFilters()" 
+                       class="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:outline-none text-sm" 
+                       placeholder="Search by name, brand, or type...">
+            </div>
+
+            <!-- Filters Group -->
+            <div class="flex flex-wrap items-center gap-3">
+                <!-- Brand Filter -->
+                <select id="filter-brand" onchange="applyFilters()" class="border border-gray-300 rounded-lg p-2 text-sm bg-white focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+                    <option value="">All Brands</option>
+                </select>
+
+                <!-- Product Type Filter -->
+                <select id="filter-type" onchange="applyFilters()" class="border border-gray-300 rounded-lg p-2 text-sm bg-white focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+                    <option value="">All Product Types</option>
+                    <option value="Automotive Battery">Automotive Battery</option>
+                    <option value="Inverter Battery">Inverter Battery</option>
+                    <option value="Home UPS">Home UPS</option>
+                    <option value="Other">Other</option>
+                </select>
+
+                <!-- Quantity Filter -->
+                <select id="filter-quantity" onchange="applyFilters()" class="border border-gray-300 rounded-lg p-2 text-sm bg-white focus:ring-2 focus:ring-indigo-500 focus:outline-none font-medium text-indigo-900">
+                    <option value="all">All Quantities</option>
+                    <option value="in_stock">In Stock (> 0)</option>
+                    <option value="out_of_stock">Out of Stock (= 0)</option>
+                    <option value="low_stock">Low Stock (< 5)</option>
+                </select>
+
+                <!-- Clear Filters Button -->
+                <button onclick="resetFilters()" class="text-xs text-gray-500 hover:text-indigo-600 underline px-2 py-1">
+                    Reset Filters
+                </button>
+            </div>
+        </div>
+
+        <!-- Inventory Table Card -->
+        <div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+            <div class="p-4 bg-gray-50 border-b border-gray-200 flex justify-between items-center">
+                <div class="flex items-center space-x-2">
+                    <h2 class="text-lg font-semibold text-gray-700">Stock Inventory</h2>
+                    <span id="item-count" class="bg-indigo-100 text-indigo-800 text-xs font-semibold px-2.5 py-0.5 rounded-full">0 items</span>
+                </div>
+                <button onclick="fetchItems()" class="text-sm text-indigo-600 hover:text-indigo-800 font-medium">
+                    🔄 Refresh
+                </button>
+            </div>
+
+            <!-- Table -->
+            <div class="overflow-x-auto">
+                <table class="w-full text-left border-collapse">
+                    <thead>
+                        <tr class="bg-gray-100 text-gray-600 uppercase text-xs font-semibold tracking-wider border-b border-gray-200">
+                            <th class="py-3 px-4">ID</th>
+                            <th class="py-3 px-4">Name</th>
+                            <th class="py-3 px-4">Brand</th>
+                            <th class="py-3 px-4">Type</th>
+                            <th class="py-3 px-4">Price</th>
+                            <th class="py-3 px-4 text-center">Quantity</th>
+                            <th class="py-3 px-4 text-right">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="inventory-table-body" class="divide-y divide-gray-200 text-sm">
+                        <!-- Loading State -->
+                        <tr>
+                            <td colspan="7" class="py-8 text-center text-gray-500">
+                                Loading inventory...
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </main>
+
+    <!-- Modal for Adding / Editing Item -->
+    <div id="item-modal" class="fixed inset-0 bg-gray-900 bg-opacity-50 hidden flex justify-center items-center p-4 z-50">
+        <div class="bg-white rounded-xl shadow-xl w-full max-w-md overflow-hidden transform transition-all">
+            <div class="px-6 py-4 bg-indigo-600 text-white flex justify-between items-center">
+                <h3 id="modal-title" class="text-lg font-bold">Add New Product</h3>
+                <button onclick="closeModal()" class="text-white hover:text-gray-200 text-xl font-bold">&times;</button>
+            </div>
+            
+            <form id="item-form" onsubmit="handleFormSubmit(event)" class="p-6 space-y-4">
+                <input type="hidden" id="edit-item-id" value="">
+
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Product Name *</label>
+                    <input type="text" id="name" required class="w-full border border-gray-300 rounded-lg p-2.5 focus:ring-2 focus:ring-indigo-500 focus:outline-none" placeholder="e.g. Inverter Battery 150Ah">
+                </div>
+
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Brand Name *</label>
+                    <input type="text" id="brand_name" required class="w-full border border-gray-300 rounded-lg p-2.5 focus:ring-2 focus:ring-indigo-500 focus:outline-none" placeholder="e.g. Exide, Luminous">
+                </div>
+
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Product Type *</label>
+                    <select id="product_type" required class="w-full border border-gray-300 rounded-lg p-2.5 focus:ring-2 focus:ring-indigo-500 focus:outline-none bg-white">
+                        <option value="Automotive Battery">Automotive Battery</option>
+                        <option value="Inverter Battery">Inverter Battery</option>
+                        <option value="Home UPS">Home UPS</option>
+                        <option value="Other">Other</option>
+                    </select>
+                </div>
+
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Price (₹) *</label>
+                        <input type="number" step="0.01" id="price" required class="w-full border border-gray-300 rounded-lg p-2.5 focus:ring-2 focus:ring-indigo-500 focus:outline-none" placeholder="0.00">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Quantity *</label>
+                        <input type="number" id="quantity" value="0" required class="w-full border border-gray-300 rounded-lg p-2.5 focus:ring-2 focus:ring-indigo-500 focus:outline-none" placeholder="0">
+                    </div>
+                </div>
+
+                <div class="flex justify-end space-x-3 pt-4 border-t border-gray-100">
+                    <button type="button" onclick="closeModal()" class="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 font-medium">Cancel</button>
+                    <button type="submit" id="submit-btn" class="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 font-medium">Save Product</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- JavaScript Application Logic -->
+    <script>
+        const API_URL = "http://192.168.1.90:5000/api/items";
+        let allItems = []; // Master list kept in memory for client-side search/filtering
+
+        document.addEventListener("DOMContentLoaded", fetchItems);
+
+        // Fetch Items from Backend
+        async function fetchItems() {
+            const tableBody = document.getElementById("inventory-table-body");
+            try {
+                const response = await fetch(API_URL);
+                if (!response.ok) throw new Error("Failed to load inventory.");
+                
+                allItems = await response.json();
+                populateBrandDropdown(allItems);
+                applyFilters(); // Render table based on current search & filter states
+            } catch (error) {
+                showAlert(error.message, "error");
+                tableBody.innerHTML = `<tr><td colspan="7" class="py-6 text-center text-red-500 font-medium">Error connecting to server at ${API_URL}</td></tr>`;
+            }
+        }
+
+        // Dynamically fill the Brand filter dropdown based on available data
+        function populateBrandDropdown(items) {
+            const brandSelect = document.getElementById("filter-brand");
+            const currentSelection = brandSelect.value;
+            const brands = [...new Set(items.map(i => i.brand_name).filter(Boolean))].sort();
+
+            brandSelect.innerHTML = `<option value="">All Brands</option>` + 
+                brands.map(b => `<option value="${escapeHtml(b)}">${escapeHtml(b)}</option>`).join('');
+            
+            brandSelect.value = currentSelection; // Retain selection if valid
+        }
+
+        // Master Filter & Search Logic
+        function applyFilters() {
+            const searchTerm = document.getElementById("search-input").value.toLowerCase().trim();
+            const selectedBrand = document.getElementById("filter-brand").value;
+            const selectedType = document.getElementById("filter-type").value;
+            const selectedQtyFilter = document.getElementById("filter-quantity").value;
+
+            const filtered = allItems.filter(item => {
+                // Search Match (Name, Brand, or Type)
+                const matchesSearch = 
+                    item.name.toLowerCase().includes(searchTerm) ||
+                    (item.brand_name && item.brand_name.toLowerCase().includes(searchTerm)) ||
+                    (item.product_type && item.product_type.toLowerCase().includes(searchTerm));
+
+                // Brand Match
+                const matchesBrand = !selectedBrand || item.brand_name === selectedBrand;
+
+                // Type Match
+                const matchesType = !selectedType || item.product_type === selectedType;
+
+                // Quantity Match
+                let matchesQty = true;
+                if (selectedQtyFilter === "in_stock") matchesQty = item.quantity > 0;
+                else if (selectedQtyFilter === "out_of_stock") matchesQty = item.quantity === 0;
+                else if (selectedQtyFilter === "low_stock") matchesQty = item.quantity < 5;
+
+                return matchesSearch && matchesBrand && matchesType && matchesQty;
+            });
+
+            renderTable(filtered);
+        }
+
+        function resetFilters() {
+            document.getElementById("search-input").value = "";
+            document.getElementById("filter-brand").value = "";
+            document.getElementById("filter-type").value = "";
+            document.getElementById("filter-quantity").value = "all";
+            applyFilters();
+        }
+
+        // Render Data into Table
+        function renderTable(items) {
+            const tableBody = document.getElementById("inventory-table-body");
+            document.getElementById("item-count").innerText = `${items.length} items`;
+            
+            if (items.length === 0) {
+                tableBody.innerHTML = `<tr><td colspan="7" class="py-8 text-center text-gray-400">No items match your criteria.</td></tr>`;
+                return;
+            }
+
+            tableBody.innerHTML = items.map(item => `
+                <tr class="hover:bg-gray-50 transition">
+                    <td class="py-3 px-4 font-mono text-xs text-gray-500">${item.id}</td>
+                    <td class="py-3 px-4 font-semibold text-gray-900">${escapeHtml(item.name)}</td>
+                    <td class="py-3 px-4 text-gray-600">${escapeHtml(item.brand_name || '-')}</td>
+                    <td class="py-3 px-4">
+                        <span class="inline-block bg-indigo-50 text-indigo-700 text-xs px-2.5 py-1 rounded-full font-medium">
+                            ${escapeHtml(item.product_type || 'Other')}
+                        </span>
+                    </td>
+                    <td class="py-3 px-4 font-medium text-gray-900">₹${Number(item.price).toFixed(2)}</td>
+                    <td class="py-3 px-4 text-center">
+                        <div class="inline-flex items-center space-x-2 bg-gray-100 p-1 rounded-lg border border-gray-200">
+                            <button onclick="updateQuantity(${item.id}, ${item.quantity - 1})" class="w-7 h-7 bg-white hover:bg-gray-200 border border-gray-300 text-gray-700 rounded font-bold transition flex items-center justify-center shadow-sm">-</button>
+                            <span class="w-8 text-center font-bold ${item.quantity < 5 ? 'text-red-600' : 'text-gray-800'}">${item.quantity}</span>
+                            <button onclick="updateQuantity(${item.id}, ${item.quantity + 1})" class="w-7 h-7 bg-white hover:bg-gray-200 border border-gray-300 text-gray-700 rounded font-bold transition flex items-center justify-center shadow-sm">+</button>
+                        </div>
+                    </td>
+                    <td class="py-3 px-4 text-right space-x-2">
+                        <button onclick="openEditModal(${item.id})" class="text-indigo-600 hover:text-indigo-800 font-medium text-xs bg-indigo-50 hover:bg-indigo-100 px-3 py-1.5 rounded-md transition">
+                            Edit
+                        </button>
+                        <button onclick="deleteItem(${item.id}, '${escapeHtml(item.name)}')" class="text-red-600 hover:text-red-800 font-medium text-xs bg-red-50 hover:bg-red-100 px-3 py-1.5 rounded-md transition">
+                            Delete
+                        </button>
+                    </td>
+                </tr>
+            `).join('');
+        }
+
+        // Form Submission Handler (Handles both Create and Full Edit)
+        async function handleFormSubmit(event) {
+            event.preventDefault();
+            const submitBtn = document.getElementById("submit-btn");
+            submitBtn.disabled = true;
+
+            const editId = document.getElementById("edit-item-id").value;
+            const payload = {
+                name: document.getElementById("name").value.trim(),
+                brand_name: document.getElementById("brand_name").value.trim(),
+                product_type: document.getElementById("product_type").value,
+                price: parseFloat(document.getElementById("price").value),
+                quantity: parseInt(document.getElementById("quantity").value, 10)
+            };
+
+            try {
+                let response;
+                if (editId) {
+                    // Update existing product details via PUT
+                    // Note: If you want to update fields other than quantity via API, 
+                    // ensure your FastAPI PUT endpoint accepts full payload or use this POST workflow.
+                    response = await fetch(`${API_URL}/${editId}`, {
+                        method: "PUT",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify(payload)
+                    });
+                } else {
+                    // Create new item
+                    response = await fetch(API_URL, {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify(payload)
+                    });
+                }
+
+                const data = await response.json();
+
+                if (!response.ok) {
+                    const errorMsg = data.detail ? parseFastAPIError(data.detail) : "Failed to save product.";
+                    throw new Error(errorMsg);
+                }
+
+                showAlert(editId ? `Updated "${payload.name}"!` : `Successfully added "${payload.name}"!`, "success");
+                closeModal();
+                fetchItems();
+            } catch (error) {
+                showAlert(error.message, "error");
+            } finally {
+                submitBtn.disabled = false;
+            }
+        }
+
+        // Quick Quantity Increment/Decrement
+        async function updateQuantity(itemId, newQuantity) {
+            if (newQuantity < 0) return;
+
+            try {
+                const response = await fetch(`${API_URL}/${itemId}`, {
+                    method: "PUT",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ quantity: newQuantity })
+                });
+
+                if (!response.ok) {
+                    const data = await response.json();
+                    throw new Error(data.detail || "Failed to update stock.");
+                }
+
+                fetchItems();
+            } catch (error) {
+                showAlert(error.message, "error");
+            }
+        }
+
+        // Delete Item
+        async function deleteItem(itemId, itemName) {
+            if (!confirm(`Are you sure you want to delete "${itemName}"?`)) return;
+
+            try {
+                const response = await fetch(`${API_URL}/${itemId}`, { method: "DELETE" });
+                if (!response.ok) throw new Error("Failed to delete item.");
+
+                showAlert(`Deleted "${itemName}" from inventory.`, "success");
+                fetchItems();
+            } catch (error) {
+                showAlert(error.message, "error");
+            }
+        }
+
+        // Modal Control Helpers
+        function openAddModal() {
+            document.getElementById("item-form").reset();
+            document.getElementById("edit-item-id").value = "";
+            document.getElementById("modal-title").innerText = "Add New Product";
+            document.getElementById("submit-btn").innerText = "Save Product";
+            document.getElementById("item-modal").classList.remove("hidden");
+        }
+
+        function openEditModal(itemId) {
+            const item = allItems.find(i => i.id === itemId);
+            if (!item) return;
+
+            document.getElementById("edit-item-id").value = item.id;
+            document.getElementById("name").value = item.name;
+            document.getElementById("brand_name").value = item.brand_name || "";
+            document.getElementById("product_type").value = item.product_type || "Other";
+            document.getElementById("price").value = item.price;
+            document.getElementById("quantity").value = item.quantity;
+
+            document.getElementById("modal-title").innerText = `Edit Product #${item.id}`;
+            document.getElementById("submit-btn").innerText = "Update Product";
+            document.getElementById("item-modal").classList.remove("hidden");
+        }
+
+        function closeModal() {
+            document.getElementById("item-modal").classList.add("hidden");
+        }
+
+        // Utilities
+        function parseFastAPIError(detail) {
+            if (Array.isArray(detail)) {
+                return detail.map(err => `${err.loc.join(" -> ")}: ${err.msg}`).join(" | ");
+            }
+            return detail;
+        }
+
+        function showAlert(message, type = "success") {
+            const container = document.getElementById("alert-container");
+            container.classList.remove("hidden", "bg-red-100", "text-red-700", "bg-green-100", "text-green-700", "border-red-300", "border-green-300");
+            
+            if (type === "error") {
+                container.classList.add("bg-red-100", "text-red-700", "border", "border-red-300");
+            } else {
+                container.classList.add("bg-green-100", "text-green-700", "border", "border-green-300");
+            }
+
+            container.innerText = message;
+            setTimeout(() => container.classList.add("hidden"), 5000);
+        }
+
+        function escapeHtml(str) {
+            return String(str).replace(/[&<>"']/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m]));
+        }
+    </script>
+</body>
+</html>

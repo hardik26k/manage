@@ -114,29 +114,67 @@ def create_item(item: ItemCreate):
             raise HTTPException(status_code=400, detail="Item already exists.")
 
 # --- UPDATE: Modify stock levels ---
-@app.put("/api/items/{item_id}")
-def update_stock(item_id: int, payload: dict):
-    # Expecting {"quantity": X} from frontend
-    if "quantity" not in payload:
-        raise HTTPException(status_code=400, detail="Missing quantity field")
+# @app.put("/api/items/{item_id}")
+# def update_stock(item_id: int, payload: dict):
+#     # Expecting {"quantity": X} from frontend
+#     if "quantity" not in payload:
+#         raise HTTPException(status_code=400, detail="Missing quantity field")
         
-    new_qty = payload["quantity"]
+#     new_qty = payload["quantity"]
 
+#     with get_db() as conn:
+#         cursor = conn.cursor()
+#         cursor.execute("UPDATE items SET quantity = ? WHERE id = ?", (new_qty, item_id))
+#         conn.commit()
+        
+#         # Fetch updated item data for the plugins
+#         cursor.execute("SELECT * FROM items WHERE id = ?", (item_id,))
+#         row = cursor.fetchone()
+        
+#         if row:
+#             item_dict = dict(row)
+#             on_stock_change(item_dict)  # Trigger hooks!
+#             return {"message": "Stock updated successfully", "item": item_dict}
+#         else:
+#             raise HTTPException(status_code=404, detail="Item not found")
+
+
+# Updated PUT route in main.py to handle full item updates
+@app.put("/api/items/{item_id}")
+def update_item(item_id: int, payload: dict):
     with get_db() as conn:
         cursor = conn.cursor()
-        cursor.execute("UPDATE items SET quantity = ? WHERE id = ?", (new_qty, item_id))
-        conn.commit()
         
-        # Fetch updated item data for the plugins
+        # Check if item exists
         cursor.execute("SELECT * FROM items WHERE id = ?", (item_id,))
-        row = cursor.fetchone()
-        
-        if row:
-            item_dict = dict(row)
-            on_stock_change(item_dict)  # Trigger hooks!
-            return {"message": "Stock updated successfully", "item": item_dict}
-        else:
+        existing_item = cursor.fetchone()
+        if not existing_item:
             raise HTTPException(status_code=404, detail="Item not found")
+
+        # Merge existing data with incoming updates
+        current = dict(existing_item)
+        new_name = payload.get("name", current["name"])
+        new_brand = payload.get("brand_name", current["brand_name"])
+        new_type = payload.get("product_type", current["product_type"])
+        new_price = payload.get("price", current["price"])
+        new_qty = payload.get("quantity", current["quantity"])
+
+        try:
+            cursor.execute("""
+                UPDATE items 
+                SET name = ?, brand_name = ?, product_type = ?, price = ?, quantity = ? 
+                WHERE id = ?
+            """, (new_name, new_brand, new_type, new_price, new_qty, item_id))
+            conn.commit()
+
+            cursor.execute("SELECT * FROM items WHERE id = ?", (item_id,))
+            updated_item = dict(cursor.fetchone())
+            
+            on_stock_change(updated_item)  # Trigger plugin hooks
+            return {"message": "Updated successfully", "item": updated_item}
+        except sqlite3.IntegrityError:
+            raise HTTPException(status_code=400, detail="Another item with this name already exists.")
+
 
 # --- DELETE: Remove an item ---
 @app.delete("/api/items/{item_id}")
