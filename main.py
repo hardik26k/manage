@@ -34,7 +34,7 @@ with get_db() as conn:
 	cursor.execute("""
 		CREATE TABLE IF NOT EXISTS items (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
-			name TEXT NOT NULL,
+			name TEXT NOT NULL UNIQUE,
 			brand_name TEXT,
 			product_type TEXT,
 			price REAL NOT NULL,
@@ -105,7 +105,7 @@ def create_item(item: ItemCreate):
         try:
             cursor.execute(
                 "INSERT INTO items (name, brand_name, product_type, quantity, price) VALUES (?, ?, ?, ?, ?)",
-                (item.name, item.brand_name, item.product_type, item.quantity, item.price)
+                (item.name.upper(), item.brand_name.upper(), item.product_type, item.quantity, item.price)
             )
             conn.commit()
             item_id = cursor.lastrowid
@@ -153,8 +153,8 @@ def update_item(item_id: int, payload: dict):
 
         # Merge existing data with incoming updates
         current = dict(existing_item)
-        new_name = payload.get("name", current["name"])
-        new_brand = payload.get("brand_name", current["brand_name"])
+        new_name = payload.get("name", current["name"]).upper()
+        new_brand = payload.get("brand_name", current["brand_name"]).upper()
         new_type = payload.get("product_type", current["product_type"])
         new_price = payload.get("price", current["price"])
         new_qty = payload.get("quantity", current["quantity"])
