@@ -1,188 +1,130 @@
-import sqlite3
 import os
-import importlib.util
-from fastapi import FastAPI, HTTPException
+from typing import Optional
+from fastapi import FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+from supabase import create_client, Client
 
-app = FastAPI()
+app = FastAPI(title="Inventory Management API")
 
-# Enable CORS
+# Enable CORS for deployed frontend
 app.add_middleware(
-	CORSMiddleware,
-	allow_origins=["*"],
-	allow_credentials=True,
-	allow_methods=["*"],
-	allow_headers=["*"],
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
+# Initialize Supabase Client
+SUPABASE_URL: str = os.getenv("SUPABASE_URL", "")
+SUPABASE_KEY: str = os.getenv("SUPABASE_KEY", "")
+
+if not SUPABASE_URL or not SUPABASE_KEY:
+    raise RuntimeError("SUPABASE_URL and SUPABASE_KEY environment variables must be set.")
+
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+
+# --- Pydantic Schemas ---
 class ItemCreate(BaseModel):
-    name: str
-    brand_name: str = None
-    product_type: str = None
-    price: float
-    quantity: int
+    name: str = Field(..., min_length=1)
+    brand_name: Optional[str] = None
+    product_type: Optional[str] = None
+    quantity: int = Field(0, ge=0)
 
-def get_db():
-    conn = sqlite3.connect("inventory.db")
-    conn.row_factory = sqlite3.Row  # Allows accessing columns by name like dicts
-    return conn
+class ItemUpdate(BaseModel):
+    name: Optional[str] = None
+    brand_name: Optional[str] = None
+    product_type: Optional[str] = None
+    quantity: Optional[int] = Field(None, ge=0)
 
-# 3. INITIALIZE DATABASE TABLE
-with get_db() as conn:
-	cursor = conn.cursor()
-	cursor.execute("""
-		CREATE TABLE IF NOT EXISTS items (
-			id INTEGER PRIMARY KEY AUTOINCREMENT,
-			name TEXT NOT NULL UNIQUE,
-			brand_name TEXT,
-			product_type TEXT,
-			price REAL NOT NULL,
-			quantity INTEGER NOT NULL
-		)
-	""")
-	conn.commit()
+# --- Plugin / Event Hook Placeholder ---
+def on_stock_change(item_data: dict):
+    print(f"[EVENT] Item state changed: {item_data}")
 
+# --- API Endpoints using supabase-py ---
 
-# ==========================================
-# 4. DYNAMIC PLUGINS LOADER
-# ==========================================
-loaded_plugins = []
-
-def load_plugins():
-    plugins_dir = os.path.join(os.path.dirname(__file__), "plugins")
-    if not os.path.exists(plugins_dir):
-        return
-
-    for filename in os.listdir(plugins_dir):
-        if filename.endswith(".py") and filename != "__init__.py":
-            plugin_name = filename[:-3]
-            file_path = os.path.join(plugins_dir, filename)
-            
-            try:
-                # Dynamic Python import mechanics
-                spec = importlib.util.spec_from_file_location(plugin_name, file_path)
-                module = importlib.util.module_from_spec(spec)
-                spec.loader.exec_module(module)
-                
-                # Verify structural contract
-                if hasattr(module, "PLUGIN_NAME") and hasattr(module, "execute"):
-                    loaded_plugins.append(module)
-                    print(f"[Plugin System] Successfully loaded: {module.PLUGIN_NAME}")
-            except Exception as e:
-                print(f"[Plugin System] Failed to load plugin {filename}: {e}")
-
-# Run the plugin loader on startup
-load_plugins()
-
-def on_stock_change(item_dict: dict):
-    print(f"[Core System] Stock updated for {item_dict['name']}. Quantity: {item_dict['quantity']}")
-    
-    # Broadcast event to all python modules in plugins/
-    for plugin in loaded_plugins:
-        try:
-            plugin.execute(item_dict)
-        except Exception as e:
-            print(f"[Plugin System] Error running plugin {plugin.PLUGIN_NAME}: {e}")
-
-# ==========================================
-# 5. CRUD API ENDPOINTS
-# ==========================================
-
-# --- READ: Get all items ---
 @app.get("/api/items")
 def get_items():
-    with get_db() as conn:
-        cursor = conn.cursor()
-        cursor.execute("SELECT * FROM items")
-        return [dict(row) for row in cursor.fetchall()]
+    try:
+        # SELECT * FROM items ORDER BY id ASC
+        response = supabase.table("items").select("*").order("id", desc=False).execute()
+        return response.data
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
-# --- CREATE: Add a new item ---
-@app.post("/api/items", status_code=201)
+@app.get("/api/items/{item_id}")
+def get_item(item_id: int):
+    try:
+        # SELECT * FROM items WHERE id = item_id
+        response = supabase.table("items").select("*").eq("id", item_id).execute()
+        if not response.data:
+            raise HTTPException(status_code=404, detail="Item not found")
+        return response.data[0]
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/items", status_code=status.HTTP_201_CREATED)
 def create_item(item: ItemCreate):
-    with get_db() as conn:
-        cursor = conn.cursor()
-        try:
-            cursor.execute(
-                "INSERT INTO items (name, brand_name, product_type, quantity, price) VALUES (?, ?, ?, ?, ?)",
-                (item.name.upper(), item.brand_name.upper(), item.product_type, item.quantity, item.price)
+    try:
+        payload = item.model_dump(exclude_unset=True)
+        # INSERT INTO items (...) VALUES (...)
+        response = supabase.table("items").insert(payload).execute()
+        
+        new_item = response.data[0]
+        on_stock_change(new_item)
+        return new_item
+    except Exception as e:
+        error_msg = str(e)
+        if "duplicate key" in error_msg.lower() or "unique constraint" in error_msg.lower():
+            raise HTTPException(
+                status_code=400, 
+                detail=f"An item named '{item.name}' already exists."
             )
-            conn.commit()
-            item_id = cursor.lastrowid
-            return {"id": item_id, "name": item.name, "brand_name": item.brand_name, "product_type": item.product_type, "quantity": item.quantity, "price": item.price}
-        except sqlite3.IntegrityError:
-            raise HTTPException(status_code=400, detail="Item already exists.")
+        raise HTTPException(status_code=500, detail=error_msg)
 
-# --- UPDATE: Modify stock levels ---
-# @app.put("/api/items/{item_id}")
-# def update_stock(item_id: int, payload: dict):
-#     # Expecting {"quantity": X} from frontend
-#     if "quantity" not in payload:
-#         raise HTTPException(status_code=400, detail="Missing quantity field")
-        
-#     new_qty = payload["quantity"]
-
-#     with get_db() as conn:
-#         cursor = conn.cursor()
-#         cursor.execute("UPDATE items SET quantity = ? WHERE id = ?", (new_qty, item_id))
-#         conn.commit()
-        
-#         # Fetch updated item data for the plugins
-#         cursor.execute("SELECT * FROM items WHERE id = ?", (item_id,))
-#         row = cursor.fetchone()
-        
-#         if row:
-#             item_dict = dict(row)
-#             on_stock_change(item_dict)  # Trigger hooks!
-#             return {"message": "Stock updated successfully", "item": item_dict}
-#         else:
-#             raise HTTPException(status_code=404, detail="Item not found")
-
-
-# Updated PUT route in main.py to handle full item updates
 @app.put("/api/items/{item_id}")
-def update_item(item_id: int, payload: dict):
-    with get_db() as conn:
-        cursor = conn.cursor()
-        
-        # Check if item exists
-        cursor.execute("SELECT * FROM items WHERE id = ?", (item_id,))
-        existing_item = cursor.fetchone()
-        if not existing_item:
+def update_item(item_id: int, payload: ItemUpdate):
+    try:
+        # 1. Verify item exists
+        existing = supabase.table("items").select("*").eq("id", item_id).execute()
+        if not existing.data:
             raise HTTPException(status_code=404, detail="Item not found")
 
-        # Merge existing data with incoming updates
-        current = dict(existing_item)
-        new_name = payload.get("name", current["name"]).upper()
-        new_brand = payload.get("brand_name", current["brand_name"]).upper()
-        new_type = payload.get("product_type", current["product_type"])
-        new_price = payload.get("price", current["price"])
-        new_qty = payload.get("quantity", current["quantity"])
+        # 2. Extract only fields provided in request body
+        update_data = payload.model_dump(exclude_unset=True)
+        if not update_data:
+            return {"message": "No fields to update", "item": existing.data[0]}
 
-        try:
-            cursor.execute("""
-                UPDATE items 
-                SET name = ?, brand_name = ?, product_type = ?, price = ?, quantity = ? 
-                WHERE id = ?
-            """, (new_name, new_brand, new_type, new_price, new_qty, item_id))
-            conn.commit()
+        # UPDATE items SET ... WHERE id = item_id
+        response = supabase.table("items").update(update_data).eq("id", item_id).execute()
+        updated_item = response.data[0]
 
-            cursor.execute("SELECT * FROM items WHERE id = ?", (item_id,))
-            updated_item = dict(cursor.fetchone())
-            
-            on_stock_change(updated_item)  # Trigger plugin hooks
-            return {"message": "Updated successfully", "item": updated_item}
-        except sqlite3.IntegrityError:
-            raise HTTPException(status_code=400, detail="Another item with this name already exists.")
+        on_stock_change(updated_item)
+        return {"message": "Updated successfully", "item": updated_item}
+    except HTTPException:
+        raise
+    except Exception as e:
+        error_msg = str(e)
+        if "duplicate key" in error_msg.lower() or "unique constraint" in error_msg.lower():
+            raise HTTPException(
+                status_code=400, 
+                detail="An item with this name already exists."
+            )
+        raise HTTPException(status_code=500, detail=error_msg)
 
-
-# --- DELETE: Remove an item ---
 @app.delete("/api/items/{item_id}")
 def delete_item(item_id: int):
-    with get_db() as conn:
-        cursor = conn.cursor()
-        cursor.execute("DELETE FROM items WHERE id = ?", (item_id,))
-        conn.commit()
-        if cursor.rowcount == 0:
+    try:
+        # DELETE FROM items WHERE id = item_id
+        response = supabase.table("items").delete().eq("id", item_id).execute()
+        if not response.data:
             raise HTTPException(status_code=404, detail="Item not found")
-        return {"message": "Deleted successfully"}
+            
+        return {"message": f"Item {item_id} successfully deleted."}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
