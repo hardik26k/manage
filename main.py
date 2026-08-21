@@ -1,9 +1,12 @@
 import os
+from dotenv import load_dotenv
 from typing import Optional
 from fastapi import FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from supabase import create_client, Client
+
+load_dotenv()
 
 app = FastAPI(title="Inventory Management API")
 
